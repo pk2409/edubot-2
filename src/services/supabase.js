@@ -136,19 +136,17 @@ export const DatabaseService = {
 
   createOCRJobForSubmission: async ({ file_url, session_id, student_id = null }) => {
   try {
-    if (!file_url || !session_id) {
-      throw new Error('Missing required fields: file_url or session_id');
+    if (!file_url) {
+      throw new Error('Missing required field: file_url');
     }
 
-    console.log('🔍 Payload:', { file_url, student_id, session_id });
+    console.log('🔍 Creating OCR job:', { file_url, session_id, student_id });
 
     const { data, error } = await supabase
       .from('ocr_jobs')
       .insert([
         {
-          file_url,
-          session_id,
-          student_id, // can be null
+          submission_id: student_id, // Use student_id as submission_id for now
           status: 'pending'
         }
       ])

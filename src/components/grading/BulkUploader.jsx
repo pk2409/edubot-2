@@ -61,8 +61,9 @@ const BulkUploader = ({ sessionId, onUploadComplete }) => {
     setUploadProgress({ completed: 0, total: files.length, percentage: 0 });
 
     try {
+      // Process files and pass them directly to the upload service
       const results = await BulkUploadService.uploadFiles(
-        files,
+        files, // Just pass the files array
         sessionId,
         (progress) => {
           setUploadProgress(progress);

@@ -104,45 +104,54 @@ const GradingHub = () => {
 
   const startOCR = async (sessionId) => {
     try {
+      console.log('🚀 Starting OCR for session:', sessionId);
+      
       const { data: submissions, error } = await DatabaseService.getSessionSubmissions(sessionId);
 
       if (error) {
         console.error('❌ Failed to fetch submissions:', error);
+        alert('Failed to fetch submissions: ' + error.message);
         return;
       }
 
-      if (!Array.isArray(submissions)) {
-        console.error('❌ submissions is not an array:', submissions);
+      if (!submissions || submissions.length === 0) {
+        alert('No submissions found for this session. Please upload some files first.');
         return;
       }
 
       console.log(`📦 Submissions received (${submissions.length}):`, submissions);
 
-      for (const sub of submissions) {
-        if (!sub.file_url) {
-          console.warn('⚠️ Skipping submission due to missing data:', sub);
+      let jobsCreated = 0;
+      
+      for (const submission of submissions) {
+        if (!submission.file_url || !submission.id) {
+          console.warn('⚠️ Skipping submission due to missing data:', submission);
           continue;
         }
 
-        const jobPayload = {
-          file_url: sub.file_url,
+        // Create OCR job with submission ID
+        const { error: jobError } = await DatabaseService.createOCRJobForSubmission({
+          file_url: submission.file_url,
           session_id: sessionId,
-          student_id: sub.student_id
-        };
-
-        console.log('📨 Creating OCR job with payload:', jobPayload);
-
-        const { error: jobError } = await DatabaseService.createOCRJobForSubmission(jobPayload);
+          student_id: submission.id // Use submission ID
+        });
+        
         if (jobError) {
-          console.warn(`❌ Failed to create job for student ${sub.student_id}:`, jobError);
+          console.warn(`❌ Failed to create OCR job for submission ${submission.id}:`, jobError);
         } else {
-          console.log(`✅ OCR job created for student ${sub.student_id}`);
+          console.log(`✅ OCR job created for submission ${submission.id}`);
+          jobsCreated++;
         }
       }
 
-      alert('✅ OCR jobs created successfully!');
+      if (jobsCreated > 0) {
+        alert(`✅ ${jobsCreated} OCR jobs created successfully! Processing will begin automatically.`);
+      } else {
+        alert('❌ No OCR jobs could be created. Please check the submissions.');
+      }
     } catch (err) {
       console.error('❌ Error starting OCR:', err);
+      alert('Error starting OCR: ' + err.message);
     }
   };
 
@@ -160,37 +169,29 @@ const GradingHub = () => {
 
     setOcrLoading(true);
     try {
+      // Import OCR service for testing
+      const { default: OCRService } = await import('../../services/grading/ocrService');
+      
       const results = [];
       
-      for (let i = 0; i < ocrTestFiles.length; i++) {
-        const file = ocrTestFiles[i];
-        console.log(`🔍 Processing file ${i + 1}/${ocrTestFiles.length}: ${file.name}`);
+      for (const file of ocrTestFiles) {
+        console.log(`🔍 Testing OCR for: ${file.name}`);
         
-        // Create a temporary file URL (in real implementation, you'd upload to your storage)
-        const tempFileUrl = URL.createObjectURL(file);
-        
-        const jobPayload = {
-          file_url: tempFileUrl,
-          session_id: null, // No session for quick test
-          student_id: `test_student_${i + 1}`, // Generate test student ID
-          file_name: file.name,
-          test_mode: true // Flag to indicate this is a test
-        };
-
-        console.log('📨 Creating quick OCR job with payload:', jobPayload);
-
         try {
-          const { data, error } = await DatabaseService.createOCRJobForSubmission(jobPayload);
-          if (error) {
-            console.warn(`❌ Failed to create OCR job for ${file.name}:`, error);
-            results.push({ file: file.name, status: 'failed', error: error.message });
-          } else {
-            console.log(`✅ OCR job created for ${file.name}`);
-            results.push({ file: file.name, status: 'success', jobId: data?.id });
-          }
-        } catch (fileError) {
-          console.error(`❌ Error processing ${file.name}:`, fileError);
-          results.push({ file: file.name, status: 'failed', error: fileError.message });
+          const ocrResult = await OCRService.processDocument(file);
+          results.push({ 
+            file: file.name, 
+            status: 'success', 
+            confidence: ocrResult.confidence,
+            textLength: ocrResult.rawText.length
+          });
+        } catch (error) {
+          console.error(`❌ OCR test failed for ${file.name}:`, error);
+          results.push({ 
+            file: file.name, 
+            status: 'failed', 
+            error: error.message 
+          });
         }
       }
 
@@ -198,8 +199,13 @@ const GradingHub = () => {
       const successCount = results.filter(r => r.status === 'success').length;
       const failedCount = results.filter(r => r.status === 'failed').length;
       
-      alert(`✅ OCR Test Results:\n${successCount} files processed successfully\n${failedCount} files failed`);
-      console.log('📊 Quick OCR Results:', results);
+      const resultDetails = results.map(r => 
+        r.status === 'success' 
+          ? `✅ ${r.file}: ${r.confidence.toFixed(1)}% confidence, ${r.textLength} chars`
+          : `❌ ${r.file}: ${r.error}`
+      ).join('\n');
+      
+      alert(`OCR Test Results:\n${successCount} successful, ${failedCount} failed\n\n${resultDetails}`);
       
     } catch (err) {
       console.error('❌ Error in quick OCR:', err);
