@@ -15,6 +15,9 @@ import GradingInterface from './pages/grading/GradingInterface';
 import SessionAnalytics from './pages/grading/SessionAnalytics';
 import GradingHistory from './pages/grading/GradingHistory';
 
+
+import ocrService from './services/grading/ocrService';
+
 function App() {
   return (
     <AuthProvider>

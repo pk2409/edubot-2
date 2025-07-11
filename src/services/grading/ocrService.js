@@ -1,3 +1,5 @@
+  import Tesseract from 'tesseract.js';
+
 // Client-side OCR Service for browser environment
 class OCRService {
   constructor() {
@@ -21,22 +23,14 @@ class OCRService {
       await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 3000));
       
       // Generate mock OCR result based on file
-      const mockText = this.generateMockOCRText(file);
+ 
+
+const result = await Tesseract.recognize(file, 'eng');
+const realText = result.data.text;
+
       const processingTime = Date.now() - startTime;
       
-      const result = {
-        provider: 'mock-tesseract',
-        pages: [{
-          pageNumber: 1,
-          text: mockText,
-          confidence: 75 + Math.random() * 20, // 75-95% confidence
-          words: this.generateMockWords(mockText)
-        }],
-        confidence: 75 + Math.random() * 20,
-        processingTime: processingTime,
-        totalPages: 1,
-        rawText: mockText
-      };
+      
       
       console.log('✅ OCR simulation completed:', {
         confidence: result.confidence.toFixed(2),
