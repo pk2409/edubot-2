@@ -16,7 +16,9 @@ import {
   Eye,
   Edit3,
   Trash2,
-  Play
+  Play,
+  Upload,
+  TestTube
 } from 'lucide-react';
 
 const GradingHub = () => {
@@ -30,6 +32,9 @@ const GradingHub = () => {
   });
   const [loading, setLoading] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [showQuickOCR, setShowQuickOCR] = useState(false);
+  const [ocrTestFiles, setOcrTestFiles] = useState([]);
+  const [ocrLoading, setOcrLoading] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -40,63 +45,29 @@ const GradingHub = () => {
   const loadGradingSessions = async () => {
     setLoading(true);
     try {
-      // For now, we'll use mock data since the database tables are new
-      const mockSessions = [
-        {
-          id: '1',
-          session_name: 'Mathematics Quiz - Chapter 5',
-          status: 'completed',
-          total_submissions: 25,
-          graded_submissions: 25,
-          created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-          completed_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-          question_paper: {
-            title: 'Algebra and Equations',
-            subject: 'Mathematics',
-            total_marks: 50
-          }
-        },
-        {
-          id: '2',
-          session_name: 'Science Test - Photosynthesis',
-          status: 'in_progress',
-          total_submissions: 18,
-          graded_submissions: 12,
-          created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-          question_paper: {
-            title: 'Plant Biology',
-            subject: 'Science',
-            total_marks: 40
-          }
-        },
-        {
-          id: '3',
-          session_name: 'History Assignment - Ancient Civilizations',
-          status: 'in_progress',
-          total_submissions: 22,
-          graded_submissions: 8,
-          created_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
-          question_paper: {
-            title: 'Harappan Civilization',
-            subject: 'History',
-            total_marks: 60
-          }
-        }
-      ];
+      const { data, error } = await DatabaseService.getGradingSessions(user.id);
+      console.log('Raw grading sessions data:', data);
+      console.log('Grading sessions fetch error:', error);
 
-      setSessions(mockSessions);
-      
-      // Calculate stats
-      const totalSessions = mockSessions.length;
-      const totalSubmissions = mockSessions.reduce((sum, session) => sum + session.total_submissions, 0);
-      const gradedSubmissions = mockSessions.reduce((sum, session) => sum + session.graded_submissions, 0);
-      const averageScore = 78; // Mock average
-      
+      if (error) throw error;
+
+      setSessions(data);
+      if (data.length > 0) {
+        console.log('Sample session:', data[0]);
+        console.log('Has question_paper relation:', data[0]?.question_paper);
+      } else {
+        console.warn('No grading sessions found for this user.');
+      } 
+
+      const totalSessions = data.length;
+      const totalSubmissions = data.reduce((sum, session) => sum + session.total_submissions, 0);
+      const gradedSubmissions = data.reduce((sum, session) => sum + session.graded_submissions, 0);
+
       setStats({
         totalSessions,
         totalSubmissions,
         gradedSubmissions,
-        averageScore
+        averageScore: 0,
       });
     } catch (error) {
       console.error('Error loading grading sessions:', error);
@@ -131,6 +102,153 @@ const GradingHub = () => {
     return Math.round((session.graded_submissions / session.total_submissions) * 100);
   };
 
+  const startOCR = async (sessionId) => {
+    try {
+      const { data: submissions, error } = await DatabaseService.getSessionSubmissions(sessionId);
+
+      if (error) {
+        console.error('❌ Failed to fetch submissions:', error);
+        return;
+      }
+
+      if (!Array.isArray(submissions)) {
+        console.error('❌ submissions is not an array:', submissions);
+        return;
+      }
+
+      console.log(`📦 Submissions received (${submissions.length}):`, submissions);
+
+      for (const sub of submissions) {
+        if (!sub.file_url) {
+          console.warn('⚠️ Skipping submission due to missing data:', sub);
+          continue;
+        }
+
+        const jobPayload = {
+          file_url: sub.file_url,
+          session_id: sessionId,
+          student_id: sub.student_id
+        };
+
+        console.log('📨 Creating OCR job with payload:', jobPayload);
+
+        const { error: jobError } = await DatabaseService.createOCRJobForSubmission(jobPayload);
+        if (jobError) {
+          console.warn(`❌ Failed to create job for student ${sub.student_id}:`, jobError);
+        } else {
+          console.log(`✅ OCR job created for student ${sub.student_id}`);
+        }
+      }
+
+      alert('✅ OCR jobs created successfully!');
+    } catch (err) {
+      console.error('❌ Error starting OCR:', err);
+    }
+  };
+
+  // New function for quick OCR testing
+  const handleQuickOCRUpload = (event) => {
+    const files = Array.from(event.target.files);
+    setOcrTestFiles(files);
+  };
+
+  const runQuickOCR = async () => {
+    if (ocrTestFiles.length === 0) {
+      alert('Please select files first');
+      return;
+    }
+
+    setOcrLoading(true);
+    try {
+      const results = [];
+      
+      for (let i = 0; i < ocrTestFiles.length; i++) {
+        const file = ocrTestFiles[i];
+        console.log(`🔍 Processing file ${i + 1}/${ocrTestFiles.length}: ${file.name}`);
+        
+        // Create a temporary file URL (in real implementation, you'd upload to your storage)
+        const tempFileUrl = URL.createObjectURL(file);
+        
+        const jobPayload = {
+          file_url: tempFileUrl,
+          session_id: null, // No session for quick test
+          student_id: `test_student_${i + 1}`, // Generate test student ID
+          file_name: file.name,
+          test_mode: true // Flag to indicate this is a test
+        };
+
+        console.log('📨 Creating quick OCR job with payload:', jobPayload);
+
+        try {
+          const { data, error } = await DatabaseService.createOCRJobForSubmission(jobPayload);
+          if (error) {
+            console.warn(`❌ Failed to create OCR job for ${file.name}:`, error);
+            results.push({ file: file.name, status: 'failed', error: error.message });
+          } else {
+            console.log(`✅ OCR job created for ${file.name}`);
+            results.push({ file: file.name, status: 'success', jobId: data?.id });
+          }
+        } catch (fileError) {
+          console.error(`❌ Error processing ${file.name}:`, fileError);
+          results.push({ file: file.name, status: 'failed', error: fileError.message });
+        }
+      }
+
+      // Show results
+      const successCount = results.filter(r => r.status === 'success').length;
+      const failedCount = results.filter(r => r.status === 'failed').length;
+      
+      alert(`✅ OCR Test Results:\n${successCount} files processed successfully\n${failedCount} files failed`);
+      console.log('📊 Quick OCR Results:', results);
+      
+    } catch (err) {
+      console.error('❌ Error in quick OCR:', err);
+      alert('❌ Error running OCR test: ' + err.message);
+    } finally {
+      setOcrLoading(false);
+      setOcrTestFiles([]);
+      setShowQuickOCR(false);
+    }
+  };
+
+  // Alternative: Direct OCR test with minimal payload
+  const runDirectOCR = async () => {
+    if (ocrTestFiles.length === 0) {
+      alert('Please select files first');
+      return;
+    }
+
+    setOcrLoading(true);
+    try {
+      for (const file of ocrTestFiles) {
+        console.log(`🔍 Direct OCR test for: ${file.name}`);
+        
+        // Create FormData for direct upload/processing
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('test_mode', 'true');
+        
+        // If you have a direct OCR endpoint, call it here
+        // const response = await fetch('/api/ocr/test', {
+        //   method: 'POST',
+        //   body: formData
+        // });
+        
+        // For now, just simulate the process
+        console.log(`📄 File: ${file.name}, Size: ${file.size} bytes, Type: ${file.type}`);
+      }
+      
+      alert(`✅ Direct OCR test completed for ${ocrTestFiles.length} files`);
+    } catch (err) {
+      console.error('❌ Error in direct OCR:', err);
+      alert('❌ Error running direct OCR: ' + err.message);
+    } finally {
+      setOcrLoading(false);
+      setOcrTestFiles([]);
+      setShowQuickOCR(false);
+    }
+  };
+
   if (loading) {
     return (
       <Layout>
@@ -153,13 +271,22 @@ const GradingHub = () => {
             <h1 className="text-3xl font-bold text-gray-800">Grading Hub</h1>
             <p className="text-gray-600 mt-2">AI-powered grading system for handwritten assignments</p>
           </div>
-          <Link
-            to="/grading/create"
-            className="flex items-center space-x-2 bg-gradient-to-r from-green-500 to-teal-500 text-white px-6 py-3 rounded-lg hover:from-green-600 hover:to-teal-600 transform hover:scale-105 transition-all duration-200 shadow-lg"
-          >
-            <Plus size={20} />
-            <span>New Grading Session</span>
-          </Link>
+          <div className="flex space-x-3">
+            <button
+              onClick={() => setShowQuickOCR(true)}
+              className="flex items-center space-x-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white px-6 py-3 rounded-lg hover:from-purple-600 hover:to-pink-600 transform hover:scale-105 transition-all duration-200 shadow-lg"
+            >
+              <TestTube size={20} />
+              <span>Quick OCR Test</span>
+            </button>
+            <Link
+              to="/grading/create"
+              className="flex items-center space-x-2 bg-gradient-to-r from-green-500 to-teal-500 text-white px-6 py-3 rounded-lg hover:from-green-600 hover:to-teal-600 transform hover:scale-105 transition-all duration-200 shadow-lg"
+            >
+              <Plus size={20} />
+              <span>New Grading Session</span>
+            </Link>
+          </div>
         </div>
 
         {/* Stats Cards */}
@@ -264,6 +391,13 @@ const GradingHub = () => {
                           <Trash2 size={14} />
                           <span>Delete</span>
                         </button>
+                        <button
+                          onClick={() => startOCR(session.id)}
+                          className="flex items-center space-x-1 text-purple-600 hover:text-purple-800 text-sm font-medium bg-purple-50 hover:bg-purple-100 px-3 py-2 rounded-lg transition-colors"
+                        >
+                          <Eye size={14} />
+                          <span>Start OCR</span>
+                        </button>
                       </div>
                     </div>
 
@@ -326,6 +460,72 @@ const GradingHub = () => {
             )}
           </div>
         </div>
+
+        {/* Quick OCR Test Modal */}
+        {showQuickOCR && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl p-8 max-w-md w-full">
+              <div className="text-center">
+                <TestTube className="mx-auto text-purple-500 mb-4" size={48} />
+                <h2 className="text-xl font-bold text-gray-800 mb-4">Quick OCR Test</h2>
+                <p className="text-gray-600 mb-6">
+                  Upload files to test OCR functionality without creating a full grading session
+                </p>
+                
+                <div className="mb-6">
+                  <label className="block w-full border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-purple-500 cursor-pointer transition-colors">
+                    <Upload className="mx-auto text-gray-400 mb-2" size={32} />
+                    <span className="text-sm text-gray-600">
+                      Click to select files or drag and drop
+                    </span>
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/*,.pdf"
+                      onChange={handleQuickOCRUpload}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                {ocrTestFiles.length > 0 && (
+                  <div className="mb-6">
+                    <p className="text-sm text-gray-600 mb-2">
+                      {ocrTestFiles.length} file(s) selected:
+                    </p>
+                    <div className="max-h-32 overflow-y-auto">
+                      {ocrTestFiles.map((file, index) => (
+                        <div key={index} className="text-xs text-gray-500 py-1">
+                          {file.name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex space-x-4">
+                  <button
+                    onClick={() => {
+                      setShowQuickOCR(false);
+                      setOcrTestFiles([]);
+                    }}
+                    className="flex-1 bg-gray-100 text-gray-700 py-3 px-4 rounded-lg hover:bg-gray-200 transition-colors"
+                    disabled={ocrLoading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={runQuickOCR}
+                    disabled={ocrTestFiles.length === 0 || ocrLoading}
+                    className="flex-1 bg-purple-500 text-white py-3 px-4 rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {ocrLoading ? 'Processing...' : 'Run OCR Test'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Delete Confirmation Modal */}
         {deleteConfirm && (

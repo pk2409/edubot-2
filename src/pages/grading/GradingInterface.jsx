@@ -14,6 +14,7 @@ import {
   ArrowLeft,
   Download
 } from 'lucide-react';
+import { DatabaseService } from '../../services/supabase';
 
 const GradingInterface = () => {
   const { sessionId } = useParams();
@@ -35,124 +36,45 @@ const GradingInterface = () => {
   const loadGradingSession = async () => {
     setLoading(true);
     try {
-      // Mock data for demonstration
-      const mockSession = {
-        id: sessionId,
-        session_name: 'Mathematics Quiz - Chapter 5',
-        question_paper: {
-          title: 'Algebra and Equations',
-          subject: 'Mathematics',
-          total_marks: 50,
-          questions: [
-            {
-              question_number: 1,
-              question_text: 'Solve for x: 2x + 5 = 15',
-              max_marks: 10,
-              answer_key: '2x = 10, x = 5'
-            },
-            {
-              question_number: 2,
-              question_text: 'Find the area of a rectangle with length 8cm and width 6cm',
-              max_marks: 15,
-              answer_key: 'Area = length × width = 8 × 6 = 48 cm²'
-            },
-            {
-              question_number: 3,
-              question_text: 'Simplify: 3(x + 4) - 2(x - 1)',
-              max_marks: 25,
-              answer_key: '3x + 12 - 2x + 2 = x + 14'
-            }
-          ]
-        }
-      };
+      const { data: sessionData, error: sessionError } = await DatabaseService.getGradingSessionById(sessionId);
+       console.log("🔍 Requested sessionId:", sessionId);
+    console.log("📦 Fetched session data:", sessionData);
+    console.log("⚠️ Session fetch error:", sessionError);
 
-      const mockSubmissions = [
-        {
-          id: '1',
-          student_name: 'Alice Johnson',
-          roll_number: '001',
-          class_section: '10-A',
-          file_name: 'alice_math_quiz.jpg',
-          ocr_text: {
-            pages: [{
-              text: `Question 1: Solve for x: 2x + 5 = 15
-Answer: 2x + 5 = 15
-2x = 15 - 5
-2x = 10
-x = 5
+if (sessionError) throw sessionError;
 
-Question 2: Find the area of a rectangle with length 8cm and width 6cm
-Answer: Area = length × width
-Area = 8 × 6 = 48 cm²
 
-Question 3: Simplify: 3(x + 4) - 2(x - 1)
-Answer: 3(x + 4) - 2(x - 1)
-= 3x + 12 - 2x + 2
-= x + 14`,
-              confidence: 92
-            }]
-          },
-          ai_grades: {
-            grades: [
-              { questionNumber: 1, marks: 10, maxMarks: 10, feedback: 'Perfect solution with clear steps' },
-              { questionNumber: 2, marks: 15, maxMarks: 15, feedback: 'Correct formula and calculation' },
-              { questionNumber: 3, marks: 23, maxMarks: 25, feedback: 'Correct answer, minor presentation issues' }
-            ],
-            totalMarks: 48,
-            percentage: 96
-          },
-          processing_status: 'graded',
-          is_reviewed: false
-        },
-        {
-          id: '2',
-          student_name: 'Bob Smith',
-          roll_number: '002',
-          class_section: '10-A',
-          file_name: 'bob_math_quiz.jpg',
-          ocr_text: {
-            pages: [{
-              text: `Question 1: Solve for x: 2x + 5 = 15
-Answer: 2x = 10
-x = 5
+const { data: submissionsData, error: submissionsError } = await DatabaseService.getSubmissionsForSession(sessionId);
+if (submissionsError) throw submissionsError;
 
-Question 2: Find the area of a rectangle with length 8cm and width 6cm
-Answer: 8 × 6 = 48
+setSession(sessionData);
+setSubmissions(submissionsData);
+console.log("📃 Submissions fetched:", submissionsData);
+console.log("🔢 currentIndex:", currentIndex);
+console.log("📌 currentSubmission:", submissionsData[currentIndex]);
 
-Question 3: Simplify: 3(x + 4) - 2(x - 1)
-Answer: 3x + 12 - 2x + 2 = x + 14`,
-              confidence: 88
-            }]
-          },
-          ai_grades: {
-            grades: [
-              { questionNumber: 1, marks: 8, maxMarks: 10, feedback: 'Correct answer but missing some steps' },
-              { questionNumber: 2, marks: 12, maxMarks: 15, feedback: 'Correct calculation but missing formula' },
-              { questionNumber: 3, marks: 25, maxMarks: 25, feedback: 'Perfect solution' }
-            ],
-            totalMarks: 45,
-            percentage: 90
-          },
-          processing_status: 'graded',
-          is_reviewed: false
-        }
-      ];
+// Load initial grades
+if (submissionsData.length > 0) {
+  const currentSubmission = submissionsData[0];
+  const initialGrades = {};
+  const gradesSource = currentSubmission.final_grades?.grades || currentSubmission.ai_grades?.grades || [];
 
-      setSession(mockSession);
-      setSubmissions(mockSubmissions);
-      
-      // Initialize grades for current submission
-      if (mockSubmissions.length > 0) {
-        const currentSubmission = mockSubmissions[0];
-        const initialGrades = {};
-        currentSubmission.ai_grades.grades.forEach(grade => {
-          initialGrades[grade.questionNumber] = {
-            marks: grade.marks,
-            feedback: grade.feedback
-          };
-        });
-        setGrades(initialGrades);
-      }
+  gradesSource.forEach(grade => {
+    initialGrades[grade.questionNumber] = {
+      marks: grade.marks,
+      feedback: grade.feedback,
+    };
+  });
+  if (!sessionError) {
+  console.log("✅ Session loaded");
+  console.log("🧪 Submissions:", submissionsData);
+}
+
+
+  setGrades(initialGrades);
+  setFeedback(currentSubmission.teacher_feedback || '');
+}
+
     } catch (error) {
       console.error('Error loading grading session:', error);
     } finally {
@@ -176,7 +98,7 @@ Answer: 3x + 12 - 2x + 2 = x + 14`,
     setSaving(true);
     try {
       // Convert grades to the expected format
-      const finalGrades = session.question_paper.questions.map(question => ({
+      const finalGrades = session.question_papers.questions.map(question => ({
         questionNumber: question.question_number,
         question: question.question_text,
         maxMarks: question.max_marks,
@@ -185,7 +107,7 @@ Answer: 3x + 12 - 2x + 2 = x + 14`,
       }));
 
       const totalMarks = finalGrades.reduce((sum, grade) => sum + grade.marks, 0);
-      const percentage = (totalMarks / session.question_paper.total_marks) * 100;
+      const percentage = (totalMarks / session.question_papers.total_marks) * 100;
       const grade = percentage >= 90 ? 'A' : percentage >= 80 ? 'B' : percentage >= 70 ? 'C' : percentage >= 60 ? 'D' : 'F';
 
       // Update submission
@@ -279,6 +201,7 @@ Answer: 3x + 12 - 2x + 2 = x + 14`,
   }
 
   if (!session || !currentSubmission) {
+    if(!session){
     return (
       <Layout>
         <div className="max-w-7xl mx-auto text-center py-12">
@@ -294,6 +217,23 @@ Answer: 3x + 12 - 2x + 2 = x + 14`,
         </div>
       </Layout>
     );
+  }
+  if (submissions.length === 0) {
+  return <Layout>
+        <div className="max-w-7xl mx-auto text-center py-12">
+          <AlertCircle className="mx-auto text-red-500 mb-4" size={48} />
+          <h2 className="text-xl font-bold text-gray-800 mb-2">NO SUBMISSION</h2>
+          <p className="text-gray-600 mb-6">Upload student answer images here</p>
+          <button
+            onClick={() => navigate('/grading')}
+            className="bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600 transition-colors"
+          >
+            Back to Grading Hub
+          </button>
+        </div>
+      </Layout>
+}
+
   }
 
   return (
@@ -311,7 +251,7 @@ Answer: 3x + 12 - 2x + 2 = x + 14`,
               </button>
               <div>
                 <h1 className="text-xl font-bold text-gray-800">{session.session_name}</h1>
-                <p className="text-sm text-gray-600">{session.question_paper.subject} • {session.question_paper.total_marks} marks</p>
+                <p className="text-sm text-gray-600">{session.question_papers.subject} • {session.question_papers.total_marks} marks</p>
               </div>
             </div>
             
@@ -394,7 +334,7 @@ Answer: 3x + 12 - 2x + 2 = x + 14`,
             <div className="p-4 h-full overflow-y-auto">
               <div className="space-y-6">
                 {/* Questions */}
-                {session.question_paper.questions.map((question) => {
+                {session.question_papers.questions.map((question) => {
                   const currentGrade = grades[question.question_number] || {};
                   const aiGrade = currentSubmission.ai_grades?.grades?.find(g => g.questionNumber === question.question_number);
                   
@@ -467,13 +407,13 @@ Answer: 3x + 12 - 2x + 2 = x + 14`,
                     <div className="flex justify-between">
                       <span>Total Marks:</span>
                       <span className="font-medium">
-                        {Object.values(grades).reduce((sum, grade) => sum + (grade.marks || 0), 0)} / {session.question_paper.total_marks}
+                        {Object.values(grades).reduce((sum, grade) => sum + (grade.marks || 0), 0)} / {session.question_papers.total_marks}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span>Percentage:</span>
                       <span className="font-medium">
-                        {Math.round((Object.values(grades).reduce((sum, grade) => sum + (grade.marks || 0), 0) / session.question_paper.total_marks) * 100)}%
+                        {Math.round((Object.values(grades).reduce((sum, grade) => sum + (grade.marks || 0), 0) / session.question_papers.total_marks) * 100)}%
                       </span>
                     </div>
                   </div>

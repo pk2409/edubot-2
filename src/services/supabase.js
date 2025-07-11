@@ -1,4 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
+// import dotenv from 'dotenv';
+
+// dotenv.config(); // Load .env variables
+
+
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-anon-key';
@@ -128,6 +133,37 @@ export const DatabaseService = {
       return { error };
     }
   },
+
+  createOCRJobForSubmission: async ({ file_url, session_id, student_id = null }) => {
+  try {
+    if (!file_url || !session_id) {
+      throw new Error('Missing required fields: file_url or session_id');
+    }
+
+    console.log('🔍 Payload:', { file_url, student_id, session_id });
+
+    const { data, error } = await supabase
+      .from('ocr_jobs')
+      .insert([
+        {
+          file_url,
+          session_id,
+          student_id, // can be null
+          status: 'pending'
+        }
+      ])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('❌ Error creating OCR job:', error);
+    return { data: null, error };
+  }
+}
+
+,
 
   // Quizzes - Enhanced for teacher/student visibility
   async createQuiz(quizData) {
@@ -390,6 +426,7 @@ export const DatabaseService = {
         .insert([sessionData])
         .select()
         .single();
+        
 
       if (error) throw error;
       return { data, error: null };
@@ -398,6 +435,21 @@ export const DatabaseService = {
       return { data: null, error };
     }
   },
+  getGradingSessionById: async (sessionId) => {
+  return await supabase
+    .from('grading_sessions')
+    .select('*, question_papers(*)')
+    .eq('id', sessionId)
+    .single();
+},
+getSubmissionsForSession: async (sessionId) => {
+  return await supabase
+    .from('student_submissions')
+    .select('*')
+    .eq('session_id', sessionId)
+    .order('created_at', { ascending: true });
+}
+,
 
   async getGradingSessions(teacherId) {
     try {
@@ -410,6 +462,7 @@ export const DatabaseService = {
         `)
         .eq('teacher_id', teacherId)
         .order('created_at', { ascending: false });
+        
 
       if (error) throw error;
       return { data, error: null };

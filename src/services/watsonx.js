@@ -1,4 +1,4 @@
-// IBM Watsonx API integration with enhanced error handling and modular RAG pipeline
+// Enhanced IBM Watsonx API integration with Vision support and existing RAG pipeline
 import { RAGPipeline } from './rag/ragPipeline';
 
 const WATSONX_URL = '/api/watsonx';
@@ -41,6 +41,69 @@ export const WatsonxService = {
       });
     }
     return this.ragPipeline;
+  },
+
+  // Image processing utilities
+  async processImage(imageInput) {
+    try {
+      let imageData = null;
+      
+      if (typeof imageInput === 'string') {
+        // Handle base64 string
+        if (imageInput.startsWith('data:image/')) {
+          imageData = imageInput;
+        } else {
+          // Handle URL - convert to base64
+          const response = await fetch(imageInput);
+          const blob = await response.blob();
+          imageData = await this.blobToBase64(blob);
+        }
+      } else if (imageInput instanceof File) {
+        // Handle File object
+        imageData = await this.fileToBase64(imageInput);
+      } else if (imageInput instanceof Blob) {
+        // Handle Blob object
+        imageData = await this.blobToBase64(imageInput);
+      }
+      
+      // Validate image format
+      const validFormats = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+      const mimeType = imageData.split(';')[0].split(':')[1];
+      
+      if (!validFormats.includes(mimeType)) {
+        throw new Error(`Unsupported image format: ${mimeType}. Supported formats: ${validFormats.join(', ')}`);
+      }
+      
+      // Check image size (Watson X has limits)
+      const sizeInMB = (imageData.length * 3) / (4 * 1024 * 1024); // Approximate size in MB
+      if (sizeInMB > 10) {
+        throw new Error('Image size too large. Please use an image smaller than 10MB.');
+      }
+      
+      return imageData;
+    } catch (error) {
+      console.error('Error processing image:', error);
+      throw new Error(`Failed to process image: ${error.message}`);
+    }
+  },
+
+  // Utility functions for image conversion
+  fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  },
+
+  blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
   },
 
   // Retry function with exponential backoff
@@ -141,7 +204,8 @@ export const WatsonxService = {
     }
   },
 
-  async sendMessage(userMessage, documentContext = '', isTeacher = false) {
+  // Enhanced sendMessage with vision support
+  async sendMessage(userMessage, documentContext = '', isTeacher = false, imageInput = null) {
     try {
       const apiKey = import.meta.env.VITE_WATSONX_API_KEY || 'TbF09oVdL4GOZQCHVTYE0HBUeicfRRXpOiBuPi_8c4eY';
       const projectId = import.meta.env.VITE_WATSONX_PROJECT_ID || '08581777-de5d-43ea-a8c6-867e4f6bb677';
@@ -151,7 +215,7 @@ export const WatsonxService = {
         return this.getRandomFallback();
       }
 
-      console.log('Sending message to Watsonx...');
+      console.log('Sending message to Watsonx...', imageInput ? 'with image' : 'text only');
 
       // Get IAM access token with retry logic
       let accessToken;
@@ -162,27 +226,62 @@ export const WatsonxService = {
         return `I'm having trouble authenticating with the AI service. ${this.getRandomFallback()}`;
       }
 
-      // Enhanced system prompt based on user role
+      // Process image if provided
+      let processedImage = null;
+      if (imageInput) {
+        try {
+          processedImage = await this.processImage(imageInput);
+          console.log('Image processed successfully');
+        } catch (imageError) {
+          console.error('Error processing image:', imageError);
+          return `I'm having trouble processing the image you provided: ${imageError.message}. Please try with a different image or ask your question without the image.`;
+        }
+      }
+
+      // Enhanced system prompt based on user role and whether image is included
       const systemPrompt = isTeacher 
-        ? `You are EduBot AI, an expert educational assistant for teachers. Provide comprehensive, professional responses that help with teaching, curriculum development, educational best practices, content creation, and student assessment. Use markdown formatting for clarity. Focus on practical, actionable advice for educators.`
-        : `You are EduBot AI, a helpful educational assistant for students. Always provide clear, educational responses using markdown formatting. Focus on helping students learn with explanations, examples, and encouraging content. Keep responses concise but informative. If you cannot answer based on available information, suggest alternative learning approaches.`;
+        ? `You are EduBot AI, an expert educational assistant for teachers. ${processedImage ? 'You can analyze images and visual content to help with teaching materials, diagrams, charts, and educational content.' : ''} Provide comprehensive, professional responses that help with teaching, curriculum development, educational best practices, content creation, and student assessment. Use markdown formatting for clarity. Focus on practical, actionable advice for educators.`
+        : `You are EduBot AI, a helpful educational assistant for students. ${processedImage ? 'You can analyze images, diagrams, charts, and visual content to help explain concepts and answer questions.' : ''} Always provide clear, educational responses using markdown formatting. Focus on helping students learn with explanations, examples, and encouraging content. Keep responses concise but informative. If you cannot answer based on available information, suggest alternative learning approaches.`;
 
       // Prepare the user prompt with context if available
       const userPrompt = documentContext 
         ? `Context from document: ${documentContext}\n\nQuestion: ${userMessage}`
         : userMessage;
 
+      // Prepare messages array with vision support
+      const messages = [
+        {
+          role: 'system',
+          content: systemPrompt
+        }
+      ];
+
+      // Add user message with image if provided
+      if (processedImage) {
+        messages.push({
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: userPrompt
+            },
+            {
+              type: 'image_url',
+              image_url: {
+                url: processedImage
+              }
+            }
+          ]
+        });
+      } else {
+        messages.push({
+          role: 'user',
+          content: userPrompt
+        });
+      }
+
       const requestBody = {
-        messages: [
-          {
-            role: 'system',
-            content: systemPrompt
-          },
-          {
-            role: 'user',
-            content: userPrompt
-          }
-        ],
+        messages: messages,
         project_id: projectId,
         model_id: 'meta-llama/llama-3-2-11b-vision-instruct',
         frequency_penalty: 0,
@@ -281,16 +380,31 @@ export const WatsonxService = {
     }
   },
 
-  // Enhanced RAG implementation with modular pipeline
-  async performRAG(userMessage, documents) {
+  // New method specifically for vision-based tasks
+  async analyzeImage(imageInput, prompt = "What do you see in this image?", isTeacher = false) {
+    console.log('Analyzing image with prompt:', prompt);
+    
+    if (!imageInput) {
+      return "Please provide an image to analyze.";
+    }
+
+    // Enhanced prompt for image analysis
+    const visionPrompt = `${prompt}\n\nPlease provide a detailed analysis of this image, focusing on educational content if present. Describe what you see, any text, diagrams, charts, or educational materials, and explain how this might be useful for learning.`;
+
+    return await this.sendMessage(visionPrompt, '', isTeacher, imageInput);
+  },
+
+  // Enhanced RAG implementation with vision support
+  async performRAG(userMessage, documents, imageInput = null) {
     try {
       console.log('🔍 Performing RAG search for:', userMessage);
       console.log('📚 Available documents:', documents.length);
+      console.log('🖼️ Has image input:', !!imageInput);
 
-      // If no documents available, return early
+      // If no documents available, use direct message with image if provided
       if (!documents || documents.length === 0) {
         console.log('📭 No documents available for RAG, using general knowledge');
-        const response = await this.sendMessage(userMessage);
+        const response = await this.sendMessage(userMessage, '', false, imageInput);
         return {
           response: response,
           sourceDocument: null
@@ -300,39 +414,81 @@ export const WatsonxService = {
       // Initialize RAG pipeline if not already done
       const ragPipeline = this.initializeRAG();
 
-      // Use the modular RAG pipeline with fresh documents
-      const result = await ragPipeline.query(userMessage, documents);
-      
-      console.log('✅ RAG pipeline result:', {
-        hasResponse: !!result.response,
-        sourceDocuments: result.sourceDocuments?.length || 0
-      });
-
-      // Find the actual source document from the original documents array
-      let sourceDocument = null;
-      if (result.sourceDocuments && result.sourceDocuments.length > 0) {
-        const sourceDocId = result.sourceDocuments[0].id;
-        sourceDocument = documents.find(doc => doc.id === sourceDocId);
+      // If image is provided, combine image analysis with RAG
+      if (imageInput) {
+        console.log('🖼️ Processing image with RAG...');
         
-        if (sourceDocument) {
-          console.log('📖 Source document found:', {
-            id: sourceDocument.id,
-            title: sourceDocument.title,
-            subject: sourceDocument.subject
-          });
-        } else {
-          console.warn('⚠️ Source document ID not found in original documents:', sourceDocId);
+        // First, analyze the image
+        const imageAnalysis = await this.analyzeImage(imageInput, 
+          `Analyze this image in the context of the following question: ${userMessage}`, 
+          false
+        );
+        
+        // Then perform RAG with enhanced context
+        const enhancedMessage = `${userMessage}\n\nImage Analysis: ${imageAnalysis}`;
+        const result = await ragPipeline.query(enhancedMessage, documents);
+        
+        // Find the source document
+        let sourceDocument = null;
+        if (result.sourceDocuments && result.sourceDocuments.length > 0) {
+          const sourceDocId = result.sourceDocuments[0].id;
+          sourceDocument = documents.find(doc => doc.id === sourceDocId);
         }
-      } else {
-        console.log('ℹ️ No source documents returned from RAG pipeline');
-      }
 
-      return {
-        response: result.response || result, // Handle both old and new formats
-        sourceDocument: sourceDocument
-      };
+        return {
+          response: result.response || result,
+          sourceDocument: sourceDocument,
+          imageAnalysis: imageAnalysis
+        };
+      } else {
+        // Regular RAG without image
+        const result = await ragPipeline.query(userMessage, documents);
+        
+        console.log('✅ RAG pipeline result:', {
+          hasResponse: !!result.response,
+          sourceDocuments: result.sourceDocuments?.length || 0
+        });
+
+        // Find the actual source document from the original documents array
+        let sourceDocument = null;
+        if (result.sourceDocuments && result.sourceDocuments.length > 0) {
+          const sourceDocId = result.sourceDocuments[0].id;
+          sourceDocument = documents.find(doc => doc.id === sourceDocId);
+          
+          if (sourceDocument) {
+            console.log('📖 Source document found:', {
+              id: sourceDocument.id,
+              title: sourceDocument.title,
+              subject: sourceDocument.subject
+            });
+          } else {
+            console.warn('⚠️ Source document ID not found in original documents:', sourceDocId);
+          }
+        } else {
+          console.log('ℹ️ No source documents returned from RAG pipeline');
+        }
+
+        return {
+          response: result.response || result,
+          sourceDocument: sourceDocument
+        };
+      }
     } catch (error) {
       console.error('❌ RAG error:', error);
+      
+      // If image was provided, try to at least analyze the image
+      if (imageInput) {
+        try {
+          const imageAnalysis = await this.analyzeImage(imageInput, userMessage, false);
+          return {
+            response: `I had trouble accessing the document database, but I can analyze your image:\n\n${imageAnalysis}`,
+            sourceDocument: null,
+            imageAnalysis: imageAnalysis
+          };
+        } catch (imageError) {
+          console.error('Failed to analyze image in fallback:', imageError);
+        }
+      }
       
       // Provide educational fallback response
       const fallbackResponse = `I'm having trouble accessing the AI service right now, but I can see you're asking about: "${userMessage}"\n\n` +
@@ -350,6 +506,7 @@ export const WatsonxService = {
     }
   },
 
+  // Rest of your existing methods remain the same...
   async generateQuizFromDocument(document) {
     try {
       console.log('Generating quiz for document:', document.title);

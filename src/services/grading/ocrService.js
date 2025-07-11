@@ -1,5 +1,6 @@
 // Enhanced OCR Service with Tesseract.js and EasyOCR support
 import { createWorker } from 'tesseract.js';
+import supabase from '../supabase.server.js';
 
 class OCRService {
   constructor() {
@@ -8,6 +9,8 @@ class OCRService {
     this.processingQueue = [];
     this.isProcessing = false;
   }
+
+  
 
   async initialize() {
     if (this.isInitialized) return;
@@ -259,6 +262,7 @@ class OCRService {
   // Start OCR processing loop
   startProcessing() {
     // Process OCR jobs every 10 seconds
+    console.log('🧠 OCR background processor started');
     setInterval(() => {
       this.processOCRJobs();
     }, 10000);
@@ -285,4 +289,7 @@ class OCRService {
   }
 }
 
-export default new OCRService();
+const ocrInstance = new OCRService();
+ocrInstance.startProcessing();
+
+export default ocrInstance;

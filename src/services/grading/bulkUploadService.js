@@ -77,114 +77,136 @@ class BulkUploadService {
   }
 
   // Upload files to Supabase Storage
-  async uploadFiles(files, sessionId, onProgress) {
-    const uploadResults = [];
-    const batchId = crypto.randomUUID();
+// Upload files with metadata (manual studentId support)
+async uploadFiles(fileDataList, sessionId, onProgress) {
+  const uploadResults = [];
+  const batchId = crypto.randomUUID();
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const { studentName, rollNumber } = this.extractStudentInfo(file.name, i);
-      
-      try {
-        // Generate unique filename
-        const timestamp = Date.now();
-        const fileExtension = file.name.split('.').pop();
-        const uniqueFilename = `${sessionId}/${batchId}/${timestamp}_${i}_${file.name}`;
+  // ✅ Step 1: Fetch session & paper info (once per upload)
+  const { data: sessionData, error: sessionErr } = await supabase
+    .from('grading_sessions')
+    .select('class_section, question_paper_id')
+    .eq('id', sessionId)
+    .single();
 
-        // Upload to Supabase Storage
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('submissions')
-          .upload(uniqueFilename, file, {
-            cacheControl: '3600',
-            upsert: false
-          });
+  const { data: paperData, error: paperErr } = await supabase
+    .from('question_papers')
+    .select('total_marks')
+    .eq('id', sessionData?.question_paper_id || '')
+    .single();
 
-        if (uploadError) {
-          throw uploadError;
-        }
+  const classSection = sessionData?.class_section || 'N/A';
+  const totalMarks = paperData?.total_marks || 100;
 
-        // Get public URL
-        const { data: urlData } = supabase.storage
-          .from('submissions')
-          .getPublicUrl(uniqueFilename);
+  // ✅ Step 2: Start file uploads
+  for (let i = 0; i < fileDataList.length; i++) {
+    const { file, studentId, studentName, rollNumber } = fileDataList[i];
 
-        // Create submission record
-        const { data: submissionData, error: submissionError } = await supabase
-          .from('student_submissions')
-          .insert({
-            session_id: sessionId,
-            student_name: studentName,
-            roll_number: rollNumber,
-            file_url: urlData.publicUrl,
-            file_name: file.name,
-            file_size: file.size,
-            file_type: file.type,
-            processing_status: 'uploaded'
-          })
-          .select()
-          .single();
+//     if (!file) {
+//   uploadResults.push({
+//     success: false,
+//     file: `File ${i + 1}`,
+//     error: 'Missing file'
+//   });
+//   continue;
+// }
 
-        if (submissionError) {
-          throw submissionError;
-        }
 
-        // Create OCR job
-        const { error: ocrError } = await supabase
-          .from('ocr_jobs')
-          .insert({
-            submission_id: submissionData.id,
-            status: 'pending',
-            ocr_provider: 'tesseract'
-          });
+    try {
+      const timestamp = Date.now();
+      const uniqueFilename = `${sessionId}/${batchId}/${timestamp}_${i}_${file.name}`;
 
-        if (ocrError) {
-          console.error('Failed to create OCR job:', ocrError);
-        }
-
-        uploadResults.push({
-          success: true,
-          file: file.name,
-          submissionId: submissionData.id,
-          studentName,
-          rollNumber
+      const { error: uploadError } = await supabase.storage
+        .from('submissions')
+        .upload(uniqueFilename, file, {
+          cacheControl: '3600',
+          upsert: false
         });
 
-        // Report progress
-        if (onProgress) {
-          onProgress({
-            completed: i + 1,
-            total: files.length,
-            currentFile: file.name,
-            percentage: Math.round(((i + 1) / files.length) * 100)
-          });
-        }
+      if (uploadError) throw uploadError;
 
-      } catch (error) {
-        console.error(`Failed to upload ${file.name}:`, error);
-        uploadResults.push({
-          success: false,
-          file: file.name,
-          error: error.message
+      const { data: urlData } = supabase.storage
+        .from('submissions')
+        .getPublicUrl(uniqueFilename);
+
+      const { data: submissionData, error: submissionError } = await supabase
+        .from('student_submissions')
+        .insert({
+          session_id: sessionId,
+          student_id: studentId,
+          student_name: studentName,
+          roll_number: rollNumber,
+          file_url: urlData.publicUrl,
+          file_name: file.name,
+          file_size: file.size,
+          file_type: file.type,
+          processing_status: 'uploaded',
+          class_section: classSection,
+          total_marks: totalMarks
+        })
+        .select()
+        .single();
+
+      if (submissionError) throw submissionError;
+
+      const { error: ocrError } = await supabase
+        .from('ocr_jobs')
+        .insert({
+          submission_id: submissionData.id,
+          status: 'pending',
+          ocr_provider: 'tesseract'
+        });
+
+      if (ocrError) {
+        console.error('Failed to create OCR job:', ocrError);
+      }
+
+      uploadResults.push({
+        success: true,
+        file: file.name,
+        submissionId: submissionData.id,
+        studentId,
+        studentName,
+        rollNumber
+      });
+
+      if (onProgress) {
+        onProgress({
+          completed: i + 1,
+          total: fileDataList.length,
+          currentFile: file.name,
+          percentage: Math.round(((i + 1) / fileDataList.length) * 100)
         });
       }
+    } catch (error) {
+      console.error(`Failed to upload ${file?.name || `File ${i + 1}`}:`, error);
+      uploadResults.push({
+        success: false,
+        file: file.name,
+        error: error.message
+      });
     }
-
-    // Update session with batch info
-    await supabase
-      .from('grading_sessions')
-      .update({
-        batch_upload_id: batchId,
-        total_submissions: uploadResults.filter(r => r.success).length
-      })
-      .eq('id', sessionId);
-
-    return {
-      batchId,
-      results: uploadResults,
-      successful: uploadResults.filter(r => r.success).length,
-      failed: uploadResults.filter(r => !r.success).length
-    };
   }
+
+  // ✅ Step 3: Update session with batch info
+  await supabase
+    .from('grading_sessions')
+    .update({
+      batch_upload_id: batchId,
+      total_submissions: uploadResults.filter(r => r.success).length
+    })
+    .eq('id', sessionId);
+
+    console.log('✅ OCR job inserted')
+
+  return {
+    batchId,
+    results: uploadResults,
+    successful: uploadResults.filter(r => r.success).length,
+    failed: uploadResults.filter(r => !r.success).length
+  };
+}
+
 
   // Get upload progress for a session
   async getUploadProgress(sessionId) {
