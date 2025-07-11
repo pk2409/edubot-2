@@ -85,17 +85,21 @@ async uploadFiles(files, sessionId, onProgress) {
   // ✅ Step 1: Fetch session & paper info (once per upload)
   const { data: sessionData, error: sessionErr } = await supabase
     .from('grading_sessions')
-    .select('class_section, question_paper_id')
+    .select('question_paper_id')
     .eq('id', sessionId)
     .single();
 
-  const { data: paperData, error: paperErr } = await supabase
-    .from('question_papers')
-    .select('total_marks')
-    .eq('id', sessionData?.question_paper_id || '')
-    .single();
+  let paperData = null;
+  if (sessionData?.question_paper_id) {
+    const { data, error: paperErr } = await supabase
+      .from('question_papers')
+      .select('total_marks, class_section')
+      .eq('id', sessionData.question_paper_id)
+      .single();
+    paperData = data;
+  }
 
-  const classSection = sessionData?.class_section || 'N/A';
+  const classSection = paperData?.class_section || 'N/A';
   const totalMarks = paperData?.total_marks || 100;
 
   // ✅ Step 2: Process files and extract student info
@@ -179,9 +183,9 @@ async uploadFiles(files, sessionId, onProgress) {
       if (onProgress) {
         onProgress({
           completed: i + 1,
-          total: fileDataList.length,
+          total: files.length,
           currentFile: file.name,
-          percentage: Math.round(((i + 1) / fileDataList.length) * 100)
+          percentage: Math.round(((i + 1) / files.length) * 100)
         });
       }
     } catch (error) {
