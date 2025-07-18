@@ -186,18 +186,19 @@ class GradingService {
 
   // Build prompt for answer sheet grading (questions + answers in same document)
   buildAnswerSheetGradingPrompt(questionPaper, rawText, ocrText) {
-    const confidence = ocrText.confidence || 0;
+    const confidence = ocrText?.confidence || ocrText?.pages?.[0]?.confidence || 0;
     const confidenceNote = confidence < 70 ? 
-      '\n\nNOTE: OCR confidence is low, so some text may be unclear or incorrect.' : '';
+      '\n\nNOTE: Text extraction confidence is low, so some text may be unclear or incorrect.' : 
+      '\n\nNOTE: Text was extracted using Watsonx Vision AI with good confidence.';
     
-    return `You are an expert teacher grading a student's handwritten answer sheet. The questions and answers are both on the same paper.
+    return `You are an expert teacher grading a student's handwritten answer sheet. The questions and answers are both on the same paper. The text was extracted using advanced Watsonx Vision AI.
 
 EXAM DETAILS:
 Subject: ${questionPaper.subject}
 Total Marks: ${questionPaper.total_marks}
 Class: ${questionPaper.class_section || 'Not specified'}
 
-STUDENT'S ANSWER SHEET (OCR Extracted):
+STUDENT'S ANSWER SHEET (Watsonx Vision Extracted):
 ${rawText}${confidenceNote}
 
 GRADING INSTRUCTIONS:
@@ -205,7 +206,7 @@ GRADING INSTRUCTIONS:
 2. For each question, find the corresponding student answer
 3. Grade each answer based on correctness, completeness, and understanding
 4. Provide marks, feedback, and suggestions for each question
-5. Account for possible OCR errors in text recognition
+5. Account for possible text extraction errors (though Watsonx Vision is quite accurate)
 6. Be fair but thorough in your assessment
 
 Please provide your grading in this EXACT JSON format:
@@ -315,25 +316,27 @@ IMPORTANT:
 
   // Build comprehensive grading prompt for Watsonx
   buildGradingPrompt(question, rawText, ocrText) {
-    const confidence = ocrText.confidence || 0;
+    const confidence = ocrText?.confidence || ocrText?.pages?.[0]?.confidence || 0;
     const confidenceNote = confidence < 70 ? 
-      '\n\nNOTE: OCR confidence is low, so some text may be unclear or incorrect.' : '';
+      '\n\nNOTE: Text extraction confidence is low, so some text may be unclear or incorrect.' : 
+      '\n\nNOTE: Text was extracted using Watsonx Vision AI with good confidence.';
     
-    return `You are an expert teacher grading a student's handwritten answer. The text was extracted using OCR with ${confidence.toFixed(1)}% confidence.
+    return `You are an expert teacher grading a student's handwritten answer. The text was extracted using Watsonx Vision AI with ${confidence.toFixed(1)}% confidence.
 
 QUESTION DETAILS:
 Question: ${question.question_text}
 Maximum Marks: ${question.max_marks}
 Answer Key/Rubric: ${question.answer_key || 'Use your expertise to evaluate the answer based on the question requirements.'}
 
-STUDENT'S HANDWRITTEN ANSWER (OCR Extracted):
+STUDENT'S HANDWRITTEN ANSWER (Watsonx Vision Extracted):
 ${rawText}${confidenceNote}
 
 GRADING INSTRUCTIONS:
 1. Evaluate the answer based on correctness, completeness, and understanding
 2. Consider partial credit for partially correct answers
-3. Account for possible OCR errors in text recognition
+3. Account for possible text extraction errors
 4. Provide constructive feedback that helps the student learn
+5. The text was extracted using advanced AI vision, so it should be quite accurate
 
 Please provide your grading in this EXACT JSON format:
 {

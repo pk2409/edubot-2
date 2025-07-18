@@ -226,28 +226,50 @@ const GradingHub = () => {
 
     setOcrLoading(true);
     try {
+      // Import the updated OCR service
+      const { default: OCRService } = await import('../../services/grading/ocrService');
+      
+      const results = [];
+      
       for (const file of ocrTestFiles) {
-        console.log(`🔍 Direct OCR test for: ${file.name}`);
+        console.log(`🔍 Testing Watsonx Vision OCR for: ${file.name}`);
         
-        // Create FormData for direct upload/processing
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('test_mode', 'true');
-        
-        // If you have a direct OCR endpoint, call it here
-        // const response = await fetch('/api/ocr/test', {
-        //   method: 'POST',
-        //   body: formData
-        // });
-        
-        // For now, just simulate the process
-        console.log(`📄 File: ${file.name}, Size: ${file.size} bytes, Type: ${file.type}`);
+        try {
+          const testResult = await OCRService.testOCR(file);
+          results.push({
+            file: file.name,
+            success: testResult.success,
+            summary: testResult.summary,
+            confidence: testResult.result?.confidence || 0,
+            textLength: testResult.result?.rawText?.length || 0,
+            provider: testResult.result?.provider || 'unknown'
+          });
+        } catch (error) {
+          console.error(`❌ OCR test failed for ${file.name}:`, error);
+          results.push({
+            file: file.name,
+            success: false,
+            summary: `Failed: ${error.message}`,
+            error: error.message
+          });
+        }
       }
       
-      alert(`✅ Direct OCR test completed for ${ocrTestFiles.length} files`);
+      // Show detailed results
+      const successCount = results.filter(r => r.success).length;
+      const failedCount = results.filter(r => !r.success).length;
+      
+      const resultDetails = results.map(r => 
+        r.success 
+          ? `✅ ${r.file}: ${r.confidence}% confidence, ${r.textLength} chars (${r.provider})`
+          : `❌ ${r.file}: ${r.error || 'Unknown error'}`
+      ).join('\n');
+      
+      alert(`Watsonx Vision OCR Test Results:\n${successCount} successful, ${failedCount} failed\n\n${resultDetails}`);
+      
     } catch (err) {
-      console.error('❌ Error in direct OCR:', err);
-      alert('❌ Error running direct OCR: ' + err.message);
+      console.error('❌ Error in Watsonx Vision OCR test:', err);
+      alert('❌ Error running Watsonx Vision OCR test: ' + err.message);
     } finally {
       setOcrLoading(false);
       setOcrTestFiles([]);
@@ -525,7 +547,14 @@ const GradingHub = () => {
                     disabled={ocrTestFiles.length === 0 || ocrLoading}
                     className="flex-1 bg-purple-500 text-white py-3 px-4 rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {ocrLoading ? 'Processing...' : 'Run OCR Test'}
+                    {ocrLoading ? 'Processing...' : 'Test Watsonx Vision'}
+                  </button>
+                  <button
+                    onClick={runDirectOCR}
+                    disabled={ocrTestFiles.length === 0 || ocrLoading}
+                    className="flex-1 bg-blue-500 text-white py-3 px-4 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {ocrLoading ? 'Processing...' : 'Direct Vision Test'}
                   </button>
                 </div>
               </div>

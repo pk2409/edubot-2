@@ -283,9 +283,9 @@ export const WatsonxService = {
       const requestBody = {
         messages: messages,
         project_id: projectId,
-        model_id: 'meta-llama/llama-3-2-11b-vision-instruct',
+        model_id: 'meta-llama/llama-3-2-90b-vision-instruct',
         frequency_penalty: 0,
-        max_tokens: 800,
+        max_tokens: 1200,
         presence_penalty: 0,
         temperature: 0.7,
         top_p: 1
@@ -380,6 +380,109 @@ export const WatsonxService = {
     }
   },
 
+  // Enhanced OCR-specific method using Watsonx Vision
+  async extractTextFromImage(imageInput, documentType = 'answer_sheet') {
+    console.log('🔍 Extracting text using Watsonx Vision for:', documentType);
+    
+    try {
+      // Process the image
+      const processedImage = await this.processImage(imageInput);
+      
+      // Create OCR-specific prompt
+      const ocrPrompt = this.buildOCRExtractionPrompt(documentType);
+      
+      // Use the vision model for text extraction
+      const response = await this.sendMessage(ocrPrompt, '', false, processedImage);
+      
+      return response;
+    } catch (error) {
+      console.error('Error in Watsonx Vision text extraction:', error);
+      throw error;
+    }
+  },
+
+  // Build OCR extraction prompt
+  buildOCRExtractionPrompt(documentType) {
+    const prompts = {
+      answer_sheet: `Please extract ALL text from this handwritten answer sheet or exam paper. This is a student's handwritten work that needs to be digitized for grading.
+
+EXTRACTION REQUIREMENTS:
+1. Extract ALL visible text including:
+   - Questions (if visible on the answer sheet)
+   - Student answers and responses
+   - Mathematical equations, formulas, and calculations
+   - Student name and roll number if visible
+   - Any diagrams descriptions or labels
+   - Handwritten notes or corrections
+
+2. Maintain the structure and order as it appears on the paper
+3. If handwriting is unclear, provide your best interpretation
+4. Separate different questions/sections clearly
+5. Include all numerical content and special characters
+
+6. Format your response as JSON:
+{
+  "extractedText": "[Complete text content maintaining structure]",
+  "confidence": [0-100 confidence score],
+  "studentInfo": {
+    "name": "[student name if visible]",
+    "rollNumber": "[roll number if visible]",
+    "class": "[class/section if visible]"
+  },
+  "questions": [
+    {
+      "questionNumber": "[number]",
+      "questionText": "[question if visible]",
+      "studentAnswer": "[student's answer]",
+      "hasCalculations": true/false,
+      "hasDiagrams": true/false
+    }
+  ],
+  "overallNotes": "[observations about handwriting quality, completeness, etc.]"
+}
+
+Be thorough and accurate. This text will be used for AI-powered grading.`,
+
+      question_paper: `Please extract ALL text from this question paper or exam document.
+
+EXTRACTION REQUIREMENTS:
+1. Extract ALL visible content including:
+   - All questions with their numbers
+   - Instructions and guidelines
+   - Marking schemes if visible
+   - Subject and exam details
+   - Total marks and time allocation
+
+2. Maintain question numbering and structure
+3. Include all mathematical formulas and special characters
+4. Preserve formatting and organization
+
+5. Format your response as JSON:
+{
+  "extractedText": "[Complete question paper text]",
+  "confidence": [0-100 confidence score],
+  "examInfo": {
+    "subject": "[subject if visible]",
+    "totalMarks": "[total marks if visible]",
+    "timeAllowed": "[time if visible]",
+    "instructions": "[general instructions]"
+  },
+  "questions": [
+    {
+      "questionNumber": "[number]",
+      "questionText": "[full question text]",
+      "marks": "[marks for this question]",
+      "type": "[multiple_choice|short_answer|essay|calculation]"
+    }
+  ],
+  "overallNotes": "[observations about the document]"
+}
+
+Extract everything accurately for educational assessment purposes.`
+    };
+    
+    return prompts[documentType] || prompts.answer_sheet;
+  },
   // New method specifically for vision-based tasks
   async analyzeImage(imageInput, prompt = "What do you see in this image?", isTeacher = false) {
     console.log('Analyzing image with prompt:', prompt);
