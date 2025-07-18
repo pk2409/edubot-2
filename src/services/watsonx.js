@@ -333,7 +333,7 @@ export const WatsonxService = {
       };
 
       // Retry the Watsonx request with minimal retry
-      const data = await this.retryWithBackoff(watsonxRequest, 0, 3000); // No retries for chat
+      const data = await this.retryWithBackoff(watsonxRequest, 2, 3000); // 2 retries for better reliability
 
       console.log('Watsonx response received successfully');
 
