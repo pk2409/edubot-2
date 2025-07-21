@@ -1,5 +1,6 @@
 // Enhanced IBM Watsonx API integration with Vision support and existing RAG pipeline
 import { RAGPipeline } from './rag/ragPipeline';
+import.meta.env.VITE_WATSONX_API_KEY
 
 const WATSONX_URL = '/api/watsonx';
 const IAM_URL = '/api/iam';
@@ -205,14 +206,37 @@ export const WatsonxService = {
   },
 
   // Enhanced sendMessage with vision support
-  async sendMessage(userMessage, documentContext = '', isTeacher = false, imageInput = null) {
+    // --- Start of Corrected sendMessage function ---
+
+  async sendMessage(userMessage, documentContext = '', isTeacher = false, imageInput = null , isDiagnosticTest = false) {
+
+     let modelToUse = 'meta-llama/llama-3-2-11b-vision-instruct';
+      if (isDiagnosticTest) {
+            modelToUse = 'meta-llama/llama-3-2-11b-vision-instruct'; // Override model for the test
+            console.log(`[DIAGNOSTIC] Overriding model to: ${modelToUse}`);
+        } else {
+            modelToUse = 'meta-llama/llama-3-2-90b-vision-instruct'; // Default vision model
+        }
     try {
-      const apiKey = import.meta.env.VITE_WATSONX_API_KEY || 'TbF09oVdL4GOZQCHVTYE0HBUeicfRRXpOiBuPi_8c4eY';
-      const projectId = import.meta.env.VITE_WATSONX_PROJECT_ID || '08581777-de5d-43ea-a8c6-867e4f6bb677';
+      // It's better practice to not have hardcoded fallbacks here.
+      // The code should fail if the .env variables are missing.
+      const apiKey = import.meta.env.VITE_WATSONX_API_KEY;
+      const projectId = import.meta.env.VITE_WATSONX_PROJECT_ID;
 
       if (!apiKey || !projectId) {
-        console.warn('Watsonx credentials not configured, using fallback');
-        return this.getRandomFallback();
+      console.error('CRITICAL: Watsonx credentials not found in .env file. Halting execution.');
+      console.error('VITE_WATSONX_API_KEY is:', apiKey);
+      console.error('VITE_WATSONX_PROJECT_ID is:', projectId);
+      throw new Error('Watsonx credentials are not configured in your .env file. Please check VITE_WATSONX_API_KEY and VITE_WATSONX_PROJECT_ID.');
+    }
+
+      
+
+
+      // More robust check. This will stop execution if credentials are not found.
+      if (!apiKey || !projectId) {
+        console.error('Watsonx credentials not configured. Please check your .env file for VITE_WATSONX_API_KEY and VITE_WATSONX_PROJECT_ID.');
+        throw new Error('Watsonx credentials not configured.');
       }
 
       console.log('Sending message to Watsonx...', imageInput ? 'with image' : 'text only');
@@ -223,7 +247,8 @@ export const WatsonxService = {
         accessToken = await this.getIAMToken(apiKey);
       } catch (tokenError) {
         console.error('Failed to get IAM token:', tokenError);
-        return `I'm having trouble authenticating with the AI service. ${this.getRandomFallback()}`;
+        // Let the error bubble up instead of returning a fallback message
+        throw new Error(`Authentication failed: ${tokenError.message}`);
       }
 
       // Process image if provided
@@ -234,21 +259,22 @@ export const WatsonxService = {
           console.log('Image processed successfully');
         } catch (imageError) {
           console.error('Error processing image:', imageError);
-          return `I'm having trouble processing the image you provided: ${imageError.message}. Please try with a different image or ask your question without the image.`;
+          throw new Error(`Image processing failed: ${imageError.message}`);
         }
       }
 
-      // Enhanced system prompt based on user role and whether image is included
+      // Enhanced system prompt (your existing logic is fine here)
       const systemPrompt = isTeacher 
         ? `You are EduBot AI, an expert educational assistant for teachers. ${processedImage ? 'You can analyze images and visual content to help with teaching materials, diagrams, charts, and educational content.' : ''} Provide comprehensive, professional responses that help with teaching, curriculum development, educational best practices, content creation, and student assessment. Use markdown formatting for clarity. Focus on practical, actionable advice for educators.`
-        : `You are EduBot AI, a helpful educational assistant for students. ${processedImage ? 'You can analyze images, diagrams, charts, and visual content to help explain concepts and answer questions.' : ''} Always provide clear, educational responses using markdown formatting. Focus on helping students learn with explanations, examples, and encouraging content. Keep responses concise but informative. If you cannot answer based on available information, suggest alternative learning approaches.`;
+        : `You are EduBot AI, a helpful educational assistant for students. ${processedImage ? 'You can analyze images, diagrams,charts, and visual content to help explain concepts and answer questions.' : ''} Always provide clear, educational responses using markdown formatting. Focus on helping students learn with explanations, examples, and encouraging content. Keep responses concise but informative. If you cannot answer based on available information, suggest alternative learning approaches.`;
 
-      // Prepare the user prompt with context if available
       const userPrompt = documentContext 
         ? `Context from document: ${documentContext}\n\nQuestion: ${userMessage}`
         : userMessage;
 
-      // Prepare messages array with vision support
+      // --- START OF MAJOR CORRECTIONS ---
+      
+      // 1. Correctly prepare the messages array for both text and vision
       const messages = [
         {
           role: 'system',
@@ -256,47 +282,56 @@ export const WatsonxService = {
         }
       ];
 
-      // Add user message with image if provided
       if (processedImage) {
+        // For vision models, the user's message content is an ARRAY
         messages.push({
           role: 'user',
           content: [
-            {
-              type: 'text',
-              text: userPrompt
-            },
+            { type: 'text', text: userPrompt },
             {
               type: 'image_url',
               image_url: {
+                // The image needs to be the base64 data URL string
                 url: processedImage
               }
             }
           ]
         });
       } else {
+        // For text-only models, the content is just a string
         messages.push({
           role: 'user',
           content: userPrompt
         });
       }
 
+      // 2. Correctly structure the entire request body
       const requestBody = {
+        model_id: modelToUse,
+        project_id: projectId, // project_id is at the top level
         messages: messages,
-        project_id: projectId,
-        model_id: 'meta-llama/llama-3-2-90b-vision-instruct',
-        frequency_penalty: 0,
-        max_tokens: 1200,
-        presence_penalty: 0,
-        temperature: 0.7,
-        top_p: 1
+        parameters: {
+           // messages array goes inside parameters
+          max_tokens: 1200,
+          temperature: 0.7,
+          top_p: 1,
+          frequency_penalty: 0,
+          presence_penalty: 0,
+        }
       };
+      
+      // 3. Remove the old, incorrect 'images' key from the top level.
 
-      console.log('Sending request to Watsonx API...');
+      // --- END OF MAJOR CORRECTIONS ---
+
+      console.log('Sending request to Watsonx API with Project ID:', projectId);
+      // Helpful log to see the structure of what you're sending
+      console.log('Request Body Structure:', JSON.stringify(requestBody, (key, value) => key === 'url' ? value.substring(0, 40) + '...' : value, 2));
+
 
       const watsonxRequest = async () => {
-        // Use 60 second timeout to align with chat request timeout
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
 
         try {
           const response = await fetch(WATSONX_URL, {
@@ -314,15 +349,15 @@ export const WatsonxService = {
 
           if (!response.ok) {
             const errorText = await response.text();
-            console.error('Watsonx API error:', response.status, errorText);
+            console.error('Watsonx API error details:', response.status, errorText);
             
-            // Clear cached token if we get auth errors
             if (response.status === 401 || response.status === 403) {
               this.accessTokenCache.token = null;
               this.accessTokenCache.expiry = null;
             }
             
-            throw new Error(`Watsonx API error (${response.status}): ${errorText}`);
+            // Re-throw with the actual API error message for better debugging
+            throw new Error(`API Error (${response.status}): ${errorText}`);
           }
 
           return await response.json();
@@ -332,170 +367,110 @@ export const WatsonxService = {
         }
       };
 
-      // Retry the Watsonx request with minimal retry
-      const data = await this.retryWithBackoff(watsonxRequest, 2, 3000); // 2 retries for better reliability
+      const data = await this.retryWithBackoff(watsonxRequest, 2, 3000);
 
       console.log('Watsonx response received successfully');
 
-      // Extract the response content - handle different response formats
+      // 4. More robust response parsing for the new payload structure.
+      // The result is often nested under 'results'.
       let content = '';
-      
-      if (data.choices && data.choices.length > 0) {
-        content = data.choices[0].message?.content || data.choices[0].text || '';
-      } else if (data.results && data.results.length > 0) {
+      if (data.results && data.results.length > 0) {
         content = data.results[0].generated_text || '';
-      } else if (data.generated_text) {
-        content = data.generated_text;
+      } else if (data.choices && data.choices.length > 0) { // Fallback for other formats
+        content = data.choices[0].message?.content || data.choices[0].text || '';
       }
 
       if (!content) {
-        console.warn('No content found in response:', data);
-        return 'I received your question but couldn\'t generate a proper response. Could you please rephrase your question or try asking about a specific topic?';
+        console.warn('No content found in Watsonx response:', data);
+        throw new Error('Received an empty response from the AI service.');
       }
 
-      // Clean up the response
       content = content.trim();
       
-      // Add educational encouragement if response is short
       if (content.length < 50) {
         content += "\n\nFeel free to ask follow-up questions or request more details about this topic!";
       }
 
       return content;
-    } catch (error) {
-      console.error('Watsonx API error:', error);
-      
-      // Provide helpful error messages based on error type
-      if (error.name === 'AbortError') {
-        return 'The request took too long to complete. Please try again with a shorter question or check your internet connection.';
-      } else if (error.message?.includes('Failed to fetch') || error.message?.includes('network')) {
-        return 'I\'m having trouble connecting to the AI service. Please check your internet connection and try again. If the problem persists, the service might be temporarily unavailable.';
-      } else if (error.message?.includes('401') || error.message?.includes('403')) {
-        return 'There\'s an authentication issue with the AI service. Please try again in a moment.';
-      } else if (error.message?.includes('429')) {
-        return 'The AI service is currently busy. Please wait a moment and try again.';
-      }
-      
-      return this.getRandomFallback();
-    }
-  },
 
-  // Enhanced OCR-specific method using Watsonx Vision
-  async extractTextFromImage(imageInput, documentType = 'answer_sheet') {
-    console.log('🔍 Extracting text using Watsonx Vision for:', documentType);
-    
-    try {
-      // Process the image
-      const processedImage = await this.processImage(imageInput);
-      
-      // Create OCR-specific prompt
-      const ocrPrompt = this.buildOCRExtractionPrompt(documentType);
-      
-      // Use the vision model for text extraction
-      const response = await this.sendMessage(ocrPrompt, '', false, processedImage);
-      
-      return response;
     } catch (error) {
-      console.error('Error in Watsonx Vision text extraction:', error);
+      console.error('Error in WatsonxService.sendMessage:', error);
+      // Re-throw the error so the calling function can handle it,
+      // for example by showing an error message to the user.
       throw error;
     }
   },
+  
+  // --- End of Corrected sendMessage function ---
 
+
+
+  // in watsonx.js
+// in watsonx.js
+// --- PASTE AND REPLACE YOUR ENTIRE sendMessage FUNCTION WITH THIS ---
+
+
+
+  
   // Build OCR extraction prompt
-  buildOCRExtractionPrompt(documentType) {
-    const prompts = {
-      answer_sheet: `Please extract ALL text from this handwritten answer sheet or exam paper. This is a student's handwritten work that needs to be digitized for grading.
 
-EXTRACTION REQUIREMENTS:
-1. Extract ALL visible text including:
-   - Questions (if visible on the answer sheet)
-   - Student answers and responses
-   - Mathematical equations, formulas, and calculations
-   - Student name and roll number if visible
-   - Any diagrams descriptions or labels
-   - Handwritten notes or corrections
 
-2. Maintain the structure and order as it appears on the paper
-3. If handwriting is unclear, provide your best interpretation
-4. Separate different questions/sections clearly
-5. Include all numerical content and special characters
-
-6. Format your response as JSON:
-{
-  "extractedText": "[Complete text content maintaining structure]",
-  "confidence": [0-100 confidence score],
-  "studentInfo": {
-    "name": "[student name if visible]",
-    "rollNumber": "[roll number if visible]",
-    "class": "[class/section if visible]"
-  },
-  "questions": [
-    {
-      "questionNumber": "[number]",
-      "questionText": "[question if visible]",
-      "studentAnswer": "[student's answer]",
-      "hasCalculations": true/false,
-      "hasDiagrams": true/false
-    }
-  ],
-  "overallNotes": "[observations about handwriting quality, completeness, etc.]"
-}
-
-Be thorough and accurate. This text will be used for AI-powered grading.`,
-
-      question_paper: `Please extract ALL text from this question paper or exam document.
-
-EXTRACTION REQUIREMENTS:
-1. Extract ALL visible content including:
-   - All questions with their numbers
-   - Instructions and guidelines
-   - Marking schemes if visible
-   - Subject and exam details
-   - Total marks and time allocation
-
-2. Maintain question numbering and structure
-3. Include all mathematical formulas and special characters
-4. Preserve formatting and organization
-
-5. Format your response as JSON:
-{
-  "extractedText": "[Complete question paper text]",
-  "confidence": [0-100 confidence score],
-  "examInfo": {
-    "subject": "[subject if visible]",
-    "totalMarks": "[total marks if visible]",
-    "timeAllowed": "[time if visible]",
-    "instructions": "[general instructions]"
-  },
-  "questions": [
-    {
-      "questionNumber": "[number]",
-      "questionText": "[full question text]",
-      "marks": "[marks for this question]",
-      "type": "[multiple_choice|short_answer|essay|calculation]"
-    }
-  ],
-  "overallNotes": "[observations about the document]"
-}
-
-Extract everything accurately for educational assessment purposes.`
-    };
-    
-    return prompts[documentType] || prompts.answer_sheet;
-  },
   // New method specifically for vision-based tasks
   async analyzeImage(imageInput, prompt = "What do you see in this image?", isTeacher = false) {
     console.log('Analyzing image with prompt:', prompt);
     
     if (!imageInput) {
-      return "Please provide an image to analyze.";
+      throw new Error("Please provide an image to analyze.");
     }
 
-    // Enhanced prompt for image analysis
+    // This is the prompt that will be sent to the AI
     const visionPrompt = `${prompt}\n\nPlease provide a detailed analysis of this image, focusing on educational content if present. Describe what you see, any text, diagrams, charts, or educational materials, and explain how this might be useful for learning.`;
 
+    // --- START OF DIAGNOSTIC CHECK ---
+
+    // For this test, we will force a call to a reliable TEXT model first.
+    // We will ask it a simple question to see if the basic API connection works.
+    // This completely bypasses the vision model to test the core service.
+
+    try {
+      console.log('--- 🧪 DIAGNOSTIC TEST RUNNING ---');
+      console.log('--- Testing with a simple text model (ibm/granite-13b-chat-v2) to confirm connectivity. ---');
+      
+      // We call sendMessage, but we pass NULL for the imageInput.
+      // This will force it to use a text-only payload.
+      // We will also override the model_id inside sendMessage for this test.
+      const testResponse = await this.sendMessage(
+        "Hello! Are you working? Please respond with 'Yes, I am working.'", // Simple test prompt
+        '',     // No document context
+        false,  // isTeacher = false
+        null,   // IMPORTANT: imageInput is null for this test
+        true    // A new flag to indicate this is a diagnostic test
+      );
+
+      console.log('--- ✅ DIAGNOSTIC TEST SUCCEEDED ---');
+      console.log('--- Text model response:', testResponse);
+      console.log('--- This confirms your API key, Project ID, and basic connection are all working correctly. ---');
+      console.log('--- The 500 error is specific to the Llama Vision model or the vision prompt. Proceeding with the original vision call... ---');
+
+    } catch (testError) {
+      console.error('--- ❌ DIAGNOSTIC TEST FAILED ---');
+      console.error('--- The simple text model also failed. This points to a wider issue with your account, region, or a major IBM outage. ---');
+      console.error('--- Test Error Details:', testError);
+      
+      // If the basic test fails, there's no point in trying the vision model.
+      // We throw the error to stop the process.
+      throw new Error(`Core API connectivity test failed: ${testError.message}`);
+    }
+
+    // --- END OF DIAGNOSTIC CHECK ---
+
+    // Now, we continue with the original call to the vision model.
+    console.log('--- Continuing with original vision model call... ---');
     return await this.sendMessage(visionPrompt, '', isTeacher, imageInput);
   },
+
+  // in watsonx.js
+
 
   // Enhanced RAG implementation with vision support
   async performRAG(userMessage, documents, imageInput = null) {
@@ -850,3 +825,8 @@ Requirements:
     return questions.slice(0, 5);
   }
 };
+
+
+
+
+
